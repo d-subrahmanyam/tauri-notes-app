@@ -16,6 +16,17 @@ import {
   updateNoteDetailsSucceeded,
 } from "./notesSlice";
 
+function toIsoOrEmpty(value: string): string {
+  if (!value) {
+    return "";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  return parsed.toISOString();
+}
+
 function* loadNotesWorker() {
   try {
     const notes: Note[] = yield call(listNotes);
@@ -29,6 +40,7 @@ function* loadNotesWorker() {
 function* createNoteWorker(action: ReturnType<typeof createNoteRequested>) {
   const title = action.payload.title.trim();
   const content = action.payload.content.trim();
+  const targetCompletionAt = toIsoOrEmpty(action.payload.targetCompletionAt.trim());
 
   if (!title || !content) {
     yield put(createNoteFailed("Title and description are required."));
@@ -36,7 +48,19 @@ function* createNoteWorker(action: ReturnType<typeof createNoteRequested>) {
   }
 
   try {
-    const created: Note = yield call(createNote, { title, content });
+    const createPayload: {
+      title: string;
+      content: string;
+      target_completion_at?: string;
+    } = {
+      title,
+      content,
+    };
+    if (targetCompletionAt) {
+      createPayload.target_completion_at = targetCompletionAt;
+    }
+
+    const created: Note = yield call(createNote, createPayload);
     yield put(createNoteSucceeded(created));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to create note";
@@ -61,9 +85,10 @@ function* toggleCompleteWorker(action: ReturnType<typeof toggleCompleteRequested
 function* updateNoteDetailsWorker(action: ReturnType<typeof updateNoteDetailsRequested>) {
   const title = action.payload.title.trim();
   const content = action.payload.content.trim();
+  const targetCompletionAt = toIsoOrEmpty(action.payload.targetCompletionAt.trim());
 
-  if (!title || !content) {
-    yield put(updateNoteDetailsFailed("Title and description are required."));
+  if (!title || !content || !targetCompletionAt) {
+    yield put(updateNoteDetailsFailed("Title, description, and target time are required."));
     return;
   }
 
@@ -71,6 +96,7 @@ function* updateNoteDetailsWorker(action: ReturnType<typeof updateNoteDetailsReq
     const updated: Note = yield call(updateNote, action.payload.id, {
       title,
       content,
+      target_completion_at: targetCompletionAt,
     });
     yield put(updateNoteDetailsSucceeded(updated));
   } catch (error) {

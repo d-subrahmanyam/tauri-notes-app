@@ -10,6 +10,7 @@ type NotesState = {
   notes: Note[];
   title: string;
   content: string;
+  targetCompletionAt: string;
   showCompleted: boolean;
   loading: boolean;
   submitting: boolean;
@@ -22,6 +23,7 @@ const initialState: NotesState = {
   notes: [],
   title: "",
   content: "",
+  targetCompletionAt: "",
   showCompleted: true,
   loading: true,
   submitting: false,
@@ -52,10 +54,16 @@ export const notesSlice = createSlice({
     setContent(state, action: PayloadAction<string>) {
       state.content = action.payload;
     },
+    setTargetCompletionAt(state, action: PayloadAction<string>) {
+      state.targetCompletionAt = action.payload;
+    },
     toggleCompletedVisibility(state) {
       state.showCompleted = !state.showCompleted;
     },
-    createNoteRequested(state, _action: PayloadAction<{ title: string; content: string }>) {
+    createNoteRequested(
+      state,
+      _action: PayloadAction<{ title: string; content: string; targetCompletionAt: string }>,
+    ) {
       state.submitting = true;
       state.error = null;
     },
@@ -64,6 +72,7 @@ export const notesSlice = createSlice({
       state.submitting = false;
       state.title = "";
       state.content = "";
+      state.targetCompletionAt = "";
     },
     createNoteFailed(state, action: PayloadAction<string>) {
       state.submitting = false;
@@ -71,7 +80,12 @@ export const notesSlice = createSlice({
     },
     updateNoteDetailsRequested(
       state,
-      _action: PayloadAction<{ id: string; title: string; content: string }>,
+      _action: PayloadAction<{
+        id: string;
+        title: string;
+        content: string;
+        targetCompletionAt: string;
+      }>,
     ) {
       state.saving = true;
       state.error = null;
@@ -117,6 +131,7 @@ export const {
   loadNotesFailed,
   setTitle,
   setContent,
+  setTargetCompletionAt,
   toggleCompletedVisibility,
   createNoteRequested,
   createNoteSucceeded,

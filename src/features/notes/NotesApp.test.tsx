@@ -20,6 +20,7 @@ function buildNote(overrides: Partial<Note> = {}): Note {
     title: "Draft roadmap",
     content: "Write product roadmap note",
     completed: false,
+    target_completion_at: "2026-01-02T10:00:00Z",
     created_at: "2026-01-01T10:00:00Z",
     updated_at: "2026-01-01T10:00:00Z",
     ...overrides,
@@ -78,6 +79,38 @@ describe("NotesApp", () => {
     });
   });
 
+  it("creates a note with configured target completion time", async () => {
+    noteApiMock.listNotes.mockResolvedValue([buildNote()]);
+    noteApiMock.createNote.mockResolvedValue(
+      buildNote({
+        id: "99",
+        title: "Custom target",
+        content: "desc",
+        target_completion_at: "2026-02-01T08:30:00.000Z",
+      }),
+    );
+
+    renderApp();
+    await screen.findByText("Draft roadmap");
+
+    await userEvent.type(screen.getByPlaceholderText("Note title"), "Custom target");
+    await userEvent.type(screen.getByPlaceholderText("Note description"), "desc");
+    fireEvent.change(
+      screen.getByLabelText("Target completion (optional, default is 24 hours)"),
+      { target: { value: "2026-02-01T08:30" } },
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Create note" }));
+
+    const expectedIso = new Date("2026-02-01T08:30").toISOString();
+    await waitFor(() => {
+      expect(noteApiMock.createNote).toHaveBeenCalledWith({
+        title: "Custom target",
+        content: "desc",
+        target_completion_at: expectedIso,
+      });
+    });
+  });
+
   it("toggles completion state", async () => {
     const initial = buildNote();
     const updated = buildNote({
@@ -113,6 +146,39 @@ describe("NotesApp", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Show completed notes" }));
     expect(screen.getByText("Done task")).toBeInTheDocument();
+  });
+
+  it("filters pending notes by custom date", async () => {
+    const pendingToday = buildNote({
+      id: "2",
+      title: "Due today",
+      completed: false,
+      target_completion_at: "2026-01-01T09:00:00Z",
+    });
+    const pendingLater = buildNote({
+      id: "3",
+      title: "Due later",
+      completed: false,
+      target_completion_at: "2026-02-01T09:00:00Z",
+    });
+    const completed = buildNote({
+      id: "4",
+      title: "Completed note",
+      completed: true,
+      target_completion_at: "2026-01-01T09:00:00Z",
+    });
+    noteApiMock.listNotes.mockResolvedValue([pendingToday, pendingLater, completed]);
+
+    renderApp();
+    await screen.findByText("Due today");
+
+    await userEvent.selectOptions(screen.getByRole("combobox"), "custom");
+    fireEvent.change(screen.getByLabelText("Pending custom date"), {
+      target: { value: "2026-01-01" },
+    });
+    expect(screen.getByText("Due today")).toBeInTheDocument();
+    expect(screen.queryByText("Due later")).not.toBeInTheDocument();
+    expect(screen.queryByText("Completed note")).not.toBeInTheDocument();
   });
 
   it("opens and closes a full note overlay on card click", async () => {
@@ -168,6 +234,7 @@ describe("NotesApp", () => {
       expect(noteApiMock.updateNote).toHaveBeenCalledWith("1", {
         title: "Updated roadmap",
         content: "# Heading\nNew plan details",
+        target_completion_at: "2026-01-02T10:00:00.000Z",
       });
     });
     await waitFor(() => {

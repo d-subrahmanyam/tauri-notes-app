@@ -1,4 +1,4 @@
-import { FiCheckCircle, FiFileText } from "react-icons/fi";
+import { FiCheckCircle, FiClock, FiFileText } from "react-icons/fi";
 import ReactMarkdown from "react-markdown";
 import type { Note } from "../types";
 
@@ -61,6 +61,11 @@ export function NoteCard({ note, onToggleComplete, onOpen }: NoteCardProps) {
       </div>
 
       <p className="inline-flex items-center gap-1 text-xs text-slate-500">
+        <FiClock />
+        Due {new Date(note.target_completion_at).toLocaleString()}
+      </p>
+
+      <p className="mt-1 inline-flex items-center gap-1 text-xs text-slate-500">
         <FiFileText />
         Updated {new Date(note.updated_at).toLocaleString()}
       </p>

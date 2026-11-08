@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -14,6 +14,7 @@ pub struct Note {
     pub title: String,
     pub content: String,
     pub completed: bool,
+    pub target_completion_at: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -30,6 +31,7 @@ pub type SharedNoteStore = Mutex<NoteStore>;
 pub struct CreateNoteInput {
     pub title: String,
     pub content: String,
+    pub target_completion_at: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -37,6 +39,11 @@ pub struct UpdateNoteInput {
     pub title: Option<String>,
     pub content: Option<String>,
     pub completed: Option<bool>,
+    pub target_completion_at: Option<String>,
+}
+
+fn default_target_completion_at(created_at: &DateTime<Utc>) -> String {
+    (*created_at + Duration::hours(24)).to_rfc3339()
 }
 
 fn open_connection(db_path: &Path) -> Result<Connection, String> {
@@ -56,6 +63,7 @@ fn ensure_schema(connection: &Connection) -> Result<(), String> {
                 title TEXT NOT NULL,
                 content TEXT NOT NULL,
                 completed INTEGER NOT NULL DEFAULT 0,
+                target_completion_at TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )",
@@ -81,13 +89,34 @@ fn ensure_schema(connection: &Connection) -> Result<(), String> {
             .map_err(|e| format!("failed to add completed column: {e}"))?;
     }
 
+    if !column_names
+        .iter()
+        .any(|name| name == "target_completion_at")
+    {
+        connection
+            .execute(
+                "ALTER TABLE notes ADD COLUMN target_completion_at TEXT NOT NULL DEFAULT ''",
+                [],
+            )
+            .map_err(|e| format!("failed to add target_completion_at column: {e}"))?;
+
+        connection
+            .execute(
+                "UPDATE notes
+                 SET target_completion_at = strftime('%Y-%m-%dT%H:%M:%SZ', datetime(created_at, '+24 hours'))
+                 WHERE target_completion_at = ''",
+                [],
+            )
+            .map_err(|e| format!("failed to backfill target_completion_at: {e}"))?;
+    }
+
     Ok(())
 }
 
 fn load_notes(connection: &Connection) -> Result<Vec<Note>, String> {
     let mut statement = connection
         .prepare(
-            "SELECT id, title, content, completed, created_at, updated_at
+            "SELECT id, title, content, completed, target_completion_at, created_at, updated_at
              FROM notes
              ORDER BY updated_at DESC",
         )
@@ -100,8 +129,9 @@ fn load_notes(connection: &Connection) -> Result<Vec<Note>, String> {
                 title: row.get(1)?,
                 content: row.get(2)?,
                 completed: row.get::<_, i64>(3)? != 0,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                target_completion_at: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
             })
         })
         .map_err(|e| format!("failed to query notes: {e}"))?;
@@ -140,18 +170,24 @@ pub fn create_note(
         .lock()
         .map_err(|_| String::from("failed to acquire note store lock"))?;
 
-    let now = Utc::now().to_rfc3339();
+    let now_dt = Utc::now();
+    let now = now_dt.to_rfc3339();
     let id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| format!("failed to create note id: {e}"))?
         .as_nanos()
         .to_string();
+    let target_completion_at = input
+        .target_completion_at
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_target_completion_at(&now_dt));
 
     let note = Note {
         id,
         title: input.title,
         content: input.content,
         completed: false,
+        target_completion_at,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -159,13 +195,14 @@ pub fn create_note(
     let connection = open_connection(&note_store.db_path)?;
     connection
         .execute(
-            "INSERT INTO notes (id, title, content, completed, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO notes (id, title, content, completed, target_completion_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 &note.id,
                 &note.title,
                 &note.content,
                 if note.completed { 1 } else { 0 },
+                &note.target_completion_at,
                 &note.created_at,
                 &note.updated_at
             ],
@@ -229,18 +266,23 @@ pub fn update_note(
         updated_note.completed = completed;
     }
 
+    if let Some(target_completion_at) = input.target_completion_at {
+        updated_note.target_completion_at = target_completion_at;
+    }
+
     updated_note.updated_at = Utc::now().to_rfc3339();
 
     let connection = open_connection(&note_store.db_path)?;
     connection
         .execute(
             "UPDATE notes
-             SET title = ?1, content = ?2, completed = ?3, updated_at = ?4
-             WHERE id = ?5",
+             SET title = ?1, content = ?2, completed = ?3, target_completion_at = ?4, updated_at = ?5
+             WHERE id = ?6",
             params![
                 &updated_note.title,
                 &updated_note.content,
                 if updated_note.completed { 1 } else { 0 },
+                &updated_note.target_completion_at,
                 &updated_note.updated_at,
                 &updated_note.id
             ],
@@ -313,6 +355,15 @@ mod tests {
             .expect("read schema");
 
         assert_eq!(has_completed, 1);
+        let has_target_completion_at: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name = 'target_completion_at'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read schema");
+        assert_eq!(has_target_completion_at, 1);
+
         let _ = std::fs::remove_file(db_path);
     }
 
@@ -324,13 +375,14 @@ mod tests {
 
         connection
             .execute(
-                "INSERT INTO notes (id, title, content, completed, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO notes (id, title, content, completed, target_completion_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     "1",
                     "Old note",
                     "first",
                     0,
+                    "2026-01-02T10:00:00Z",
                     "2026-01-01T10:00:00Z",
                     "2026-01-01T10:00:00Z"
                 ],
@@ -339,13 +391,14 @@ mod tests {
 
         connection
             .execute(
-                "INSERT INTO notes (id, title, content, completed, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO notes (id, title, content, completed, target_completion_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     "2",
                     "New note",
                     "second",
                     1,
+                    "2026-01-02T11:00:00Z",
                     "2026-01-01T11:00:00Z",
                     "2026-01-01T11:00:00Z"
                 ],

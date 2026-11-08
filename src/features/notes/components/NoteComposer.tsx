@@ -4,18 +4,22 @@ import { FiLoader, FiPlus } from "react-icons/fi";
 type NoteComposerProps = {
   title: string;
   content: string;
+  targetCompletionAt: string;
   submitting: boolean;
   onTitleChange: (value: string) => void;
   onContentChange: (value: string) => void;
+  onTargetCompletionAtChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
 export function NoteComposer({
   title,
   content,
+  targetCompletionAt,
   submitting,
   onTitleChange,
   onContentChange,
+  onTargetCompletionAtChange,
   onSubmit,
 }: NoteComposerProps) {
   return (
@@ -39,6 +43,18 @@ export function NoteComposer({
           rows={4}
           className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 outline-none ring-emerald-500 transition focus:ring-2"
         />
+        <div className="grid gap-1">
+          <label className="text-sm font-medium text-slate-700" htmlFor="target-completion-at">
+            Target completion (optional, default is 24 hours)
+          </label>
+          <input
+            id="target-completion-at"
+            type="datetime-local"
+            value={targetCompletionAt}
+            onChange={(event) => onTargetCompletionAtChange(event.currentTarget.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-emerald-500 transition focus:ring-2"
+          />
+        </div>
         <button
           type="submit"
           disabled={submitting}

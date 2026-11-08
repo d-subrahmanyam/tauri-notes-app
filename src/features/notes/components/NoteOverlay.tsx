@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   FiCode,
+  FiClock,
   FiEdit3,
   FiEye,
   FiHash,
@@ -18,25 +19,34 @@ import type { Note } from "../types";
 type NoteOverlayProps = {
   note: Note;
   saving: boolean;
-  onSave: (payload: { id: string; title: string; content: string }) => void;
+  onSave: (payload: {
+    id: string;
+    title: string;
+    content: string;
+    targetCompletionAt: string;
+  }) => void;
   onClose: () => void;
 };
 
 export function NoteOverlay({ note, saving, onSave, onClose }: NoteOverlayProps) {
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
+  const [targetCompletionAt, setTargetCompletionAt] = useState(note.target_completion_at);
+  const [customSnoozeAt, setCustomSnoozeAt] = useState("");
   const [mode, setMode] = useState<"write" | "preview">("write");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setTitle(note.title);
     setContent(note.content);
+    setTargetCompletionAt(note.target_completion_at);
+    setCustomSnoozeAt("");
     setMode("write");
-  }, [note.id, note.title, note.content]);
+  }, [note.id, note.title, note.content, note.target_completion_at]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSave({ id: note.id, title, content });
+    onSave({ id: note.id, title, content, targetCompletionAt });
   }
 
   useEffect(() => {
@@ -96,6 +106,38 @@ export function NoteOverlay({ note, saving, onSave, onClose }: NoteOverlayProps)
     });
   }
 
+  function addSnooze(durationMs: number) {
+    const base = new Date(targetCompletionAt);
+    if (Number.isNaN(base.getTime())) {
+      return;
+    }
+    const next = new Date(base.getTime() + durationMs);
+    setTargetCompletionAt(next.toISOString());
+  }
+
+  function applyCustomSnooze() {
+    if (!customSnoozeAt) {
+      return;
+    }
+    const next = new Date(customSnoozeAt);
+    if (Number.isNaN(next.getTime())) {
+      return;
+    }
+    setTargetCompletionAt(next.toISOString());
+  }
+
+  function toDateTimeLocal(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return "";
+    }
+
+    const pad = (input: number) => String(input).padStart(2, "0");
+    return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(
+      parsed.getHours(),
+    )}:${pad(parsed.getMinutes())}`;
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
@@ -125,6 +167,70 @@ export function NoteOverlay({ note, saving, onSave, onClose }: NoteOverlayProps)
             onChange={(event) => setTitle(event.currentTarget.value)}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none ring-emerald-500 transition focus:ring-2"
           />
+
+          <div className="grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+              <FiClock />
+              Target completion
+            </p>
+            <input
+              aria-label="Target completion"
+              type="datetime-local"
+              value={toDateTimeLocal(targetCompletionAt)}
+              onChange={(event) => {
+                const parsed = new Date(event.currentTarget.value);
+                if (!Number.isNaN(parsed.getTime())) {
+                  setTargetCompletionAt(parsed.toISOString());
+                }
+              }}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-emerald-500 transition focus:ring-2"
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => addSnooze(60 * 60 * 1000)}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+              >
+                +1h
+              </button>
+              <button
+                type="button"
+                onClick={() => addSnooze(7 * 24 * 60 * 60 * 1000)}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+              >
+                +1w
+              </button>
+              <button
+                type="button"
+                onClick={() => addSnooze(30 * 24 * 60 * 60 * 1000)}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+              >
+                +1m
+              </button>
+              <button
+                type="button"
+                onClick={() => addSnooze(365 * 24 * 60 * 60 * 1000)}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+              >
+                +1y
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="datetime-local"
+                value={customSnoozeAt}
+                onChange={(event) => setCustomSnoozeAt(event.currentTarget.value)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-emerald-500 transition focus:ring-2"
+              />
+              <button
+                type="button"
+                onClick={applyCustomSnooze}
+                className="rounded-md border border-slate-300 bg-white px-2 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+              >
+                Set custom
+              </button>
+            </div>
+          </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label
